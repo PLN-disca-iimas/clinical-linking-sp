@@ -1,113 +1,113 @@
-# Clinical Entity Linking — Spanish NER → SNOMED CT
+# Vinculación de Entidades Clínicas — NER en Español → SNOMED CT
 
-> A production-grade NLP pipeline that links Spanish clinical named entities to standardized **SNOMED CT** concepts using neural machine translation, multilingual embeddings, and approximate nearest-neighbour search.
-
----
-
-## Table of Contents
-
-- [Overview](#overview)
-- [Presentation](#presentation)
-- [Pipeline Architecture](#pipeline-architecture)
-- [Requirements](#requirements)
-- [Installation](#installation)
-- [Data](#data)
-- [Usage](#usage)
-- [Models](#models)
-- [Evaluation](#evaluation)
-- [Project Structure](#project-structure)
-- [Known Limitations](#known-limitations)
-- [Contributing](#contributing)
-- [License](#license)
+> Pipeline de PLN para vincular entidades médicas extraídas de textos clínicos en español con conceptos estandarizados de **SNOMED CT**, utilizando traducción automática neuronal, embeddings multilingües y búsqueda por similitud semántica.
 
 ---
 
-## Overview
+## Tabla de Contenidos
 
-Clinical free-text in Spanish often contains medical entities (diagnoses, symptoms, procedures) that need to be normalized to a controlled vocabulary for interoperability, research, and billing. This notebook implements an end-to-end **entity linking** pipeline evaluated on the [DisTEMIST](https://temu.bsc.es/distemist/) shared task dataset.
-
-The pipeline resolves each Spanish mention to its most likely **SNOMED CT concept ID** without any task-specific fine-tuning, relying entirely on:
-
-1. A curated medical translation dictionary.
-2. Neural machine translation as a fallback.
-3. Semantic similarity via multilingual sentence embeddings.
-4. Efficient vector search (FAISS).
-
----
-
-## Presentation
-
-A slide deck summarising the motivation, methodology, and results of this project is available directly in this repository:
-
-**[Vinculacion de Entidades Medicas (PDF)](Presentation%20-%20Vinculacion%20de%20Entidades%20Medicas.pdf)**
-
-It covers the problem statement, the pipeline design decisions, and a discussion of the evaluation results — recommended as a starting point before diving into the notebook.
+- [Descripción General](#descripción-general)
+- [Presentación](#presentación)
+- [Arquitectura del Pipeline](#arquitectura-del-pipeline)
+- [Requisitos](#requisitos)
+- [Instalación](#instalación)
+- [Datos](#datos)
+- [Uso](#uso)
+- [Modelos](#modelos)
+- [Evaluación](#evaluación)
+- [Estructura del Proyecto](#estructura-del-proyecto)
+- [Limitaciones Conocidas](#limitaciones-conocidas)
 
 ---
 
-## Pipeline Architecture
+## Descripción General
+
+Este notebook implementa un pipeline de **vinculación de entidades** (*entity linking*) para textos clínicos en español, evaluado sobre el corpus del reto compartido [DisTEMIST](https://temu.bsc.es/distemist/).
+
+El punto de partida es un archivo `.tsv` que contiene entidades médicas ya extraídas de aproximadamente **750 documentos clínicos en español**, resultado de un proceso previo de Reconocimiento de Entidades Nombradas (NER) que no forma parte de este trabajo. Dicho archivo incluye, entre otros campos, la mención clínica en español y su código SNOMED CT, que es la información relevante para esta tarea.
+
+El objetivo del pipeline es tomar cada mención clínica en español y resolverla hacia su **código de concepto SNOMED CT** más probable, sin necesidad de ajuste fino (*fine-tuning*) específico para la tarea. Para ello se apoya en:
+
+1. Un diccionario de terminología médica con traducción manual (No verificado por un especialista).
+2. Traducción automática neuronal como mecanismo de respaldo.
+3. Similitud semántica mediante embeddings de oraciones multilingües.
+4. Búsqueda eficiente por vectores con FAISS.
+
+---
+
+## Presentación
+
+La presentación del proyecto está disponible directamente en este repositorio:
+
+**[Vinculación de Entidades Médicas (PDF)](Presentation%20-%20Vinculacion%20de%20Entidades%20Medicas.pdf)**
+
+Cubre el planteamiento del problema, las decisiones de diseño del pipeline y un análisis de los resultados de evaluación. Se recomienda revisarla antes de explorar el notebook.
+
+---
+
+## Arquitectura del Pipeline
 
 ```
-Spanish NER spans
+Entidades NER en español (.tsv)
         │
         ▼
 ┌───────────────────────┐
-│  Medical Dictionary   │  ← Rule-based, high-precision translations
+│  Diccionario Médico   │  ← Traducciones manuales
 │  (MEDICAL_DICT)       │
 └──────────┬────────────┘
-           │ unmapped spans
+           │ menciones no cubiertas
            ▼
 ┌───────────────────────┐
-│  Neural MT            │  ← Helsinki-NLP/opus-mt-es-en (MarianMT)
-│  (ES → EN)            │    + post-processing corrections
+│  Traducción Neuronal  │  ← Helsinki-NLP/opus-mt-es-en (MarianMT)
+│  (ES → EN)            │    + correcciones de postprocesamiento
 └──────────┬────────────┘
-           │ English mentions
+           │ menciones en inglés
            ▼
 ┌───────────────────────┐
-│  Multilingual         │  ← intfloat/multilingual-e5-large
-│  Embeddings           │    query prefix: "query:"
+│  Embeddings           │  ← intfloat/multilingual-e5-large
+│  Multilingües         │    prefijo de consulta: "query:"
 └──────────┬────────────┘
-           │ query vectors
+           │ vectores de consulta
            ▼
 ┌───────────────────────┐
-│  FAISS Index          │  ← IndexFlatIP (Inner Product / cosine)
-│  (SNOMED CT KB)       │    passage prefix: "passage:"
+│  Índice FAISS         │  ← IndexFlatIP (producto interno / coseno)
+│  (Base SNOMED CT)     │    prefijo de pasaje: "passage:"
 └──────────┬────────────┘
-           │ top-K candidates
+           │ top-K candidatos
            ▼
-     SNOMED CT Code
+     Código SNOMED CT
 ```
 
 ---
 
-## Requirements
+## Requisitos
 
-| Dependency | Version |
+| Dependencia | Versión |
 |---|---|
 | Python | ≥ 3.9 |
 | PyTorch | ≥ 2.0 |
 | Transformers (HuggingFace) | ≥ 4.38 |
-| FAISS | `faiss-cpu` or `faiss-gpu` |
+| FAISS | `faiss-cpu` o `faiss-gpu` |
 | pandas | ≥ 2.0 |
 | numpy | ≥ 1.24 |
 | tqdm | ≥ 4.0 |
 
-> **GPU note:** The notebook auto-detects CUDA. GPU is strongly recommended for the embedding and translation steps. CPU execution is supported but significantly slower.
+> **Nota sobre GPU:** El notebook detecta CUDA automáticamente. Se recomienda GPU para los pasos de traducción y generación de embeddings. La ejecución en CPU es posible pero considerablemente más lenta.
 
 ---
 
-## Installation
+## Instalación
 
 ```bash
-# Clone the repository
-git clone https://github.com/<your-username>/<your-repo>.git
-cd <your-repo>
+# Clonar el repositorio
+git clone https://github.com/PLN-disca-iimas/clinical-linking-sp.git
+cd clinical-linking-sp
 
-# Install dependencies
+# Instalar dependencias
 pip install transformers accelerate torch faiss-cpu numpy pandas tqdm
 ```
 
-For GPU-accelerated FAISS:
+Para FAISS con aceleración por GPU:
 
 ```bash
 pip install faiss-gpu
@@ -115,60 +115,59 @@ pip install faiss-gpu
 
 ---
 
-## Data
+## Datos
 
-> **The SNOMED CT snapshot is NOT included in this repository** — it is a licensed file that cannot be redistributed. The DisTEMIST `.tsv` file is included under `data/`. See the instructions below for obtaining the SNOMED snapshot.
+> **El snapshot de SNOMED CT NO está incluido en este repositorio** — es un archivo licenciado que no puede redistribuirse. El archivo `.tsv` de DisTEMIST sí está incluido en `data/`. Consulta las instrucciones para obtener el snapshot de SNOMED CT.
 
-### Input — NER entities (included ✅)
+### Entrada — Entidades NER
 
 ```
 data/distemist_subtrack2_training1_linking.tsv
 ```
 
-A TSV file with at minimum the following columns:
+Archivo TSV resultado del proceso de Reconocimiento de Entidades Nombradas (NER). Las columnas relevantes para este pipeline son:
 
-| Column | Description |
+| Columna | Descripción |
 |---|---|
-| `span` | Raw Spanish clinical mention (e.g., `"fractura conminuta"`) |
-| `code` | Gold-standard SNOMED CT concept ID |
+| `span` | Mención clínica en español (ej. `"fractura conminuta"`) |
+| `code` | Código SNOMED CT de referencia (*gold standard*) |
 
-This file is part of the **DisTEMIST** corpus. You can also download it from the [official shared task page](https://temu.bsc.es/distemist/).
+Este archivo forma parte del corpus **DisTEMIST**. También puede descargarse desde la [página oficial del reto](https://temu.bsc.es/distemist/).
 
-### Input — SNOMED CT snapshot (excluded  — licence required)
+### Entrada — Snapshot de SNOMED CT (requiere licencia)
 
 ```
 sct2_Description_Snapshot-en_INT_20260101.txt
 ```
 
-The official SNOMED CT International Edition description snapshot (tab-separated, ~226 MB). This file is **excluded from the repository** for two reasons: it exceeds GitHub's 100 MB file limit, and it is proprietary — redistribution is not permitted under the SNOMED CT licence.
+Snapshot oficial de la Edición Internacional de SNOMED CT (separado por tabulaciones, ~226 MB). Este archivo está **excluido del repositorio** por dos razones: supera el límite de 100 MB de GitHub y es propietario — su redistribución no está permitida bajo la licencia de SNOMED CT.
 
-**How to obtain it:**
-1. Register for a free licence at [SNOMED International](https://www.snomed.org/get-snomed).
-2. Download the International Edition release package.
-3. Locate `sct2_Description_Snapshot-en_INT_<release_date>.txt` inside the archive.
-4. Place it in `/content/` (Colab) or update the `path_snomed` variable in the notebook.
-
+**Cómo obtenerlo:**
+1. Registrarse para obtener una licencia gratuita en [SNOMED International](https://www.snomed.org/get-snomed).
+2. Descargar el paquete de la Edición Internacional.
+3. Localizar el archivo `sct2_Description_Snapshot-en_INT_<fecha_release>.txt` dentro del paquete.
+4. Colocarlo en `/content/` (Colab) o actualizar la variable `path_snomed` en el notebook.
 
 ---
 
-## Usage
+## Uso
 
-### Google Colab (recommended)
+### Google Colab (recomendado)
 
-1. Open `Clinical_coding.ipynb` in Google Colab.
-2. Upload `distemist_subtrack2_training1_linking.tsv` and `sct2_Description_Snapshot-en_INT_20260101.txt` to `/content/`.
-3. Run all cells in order.
+1. Abrir `Clinical_coding.ipynb` en Google Colab.
+2. Subir `sct2_Description_Snapshot-en_INT_20260101.txt` a `/content/`.
+3. Ejecutar todas las celdas en orden.
 
-### Local execution
+### Ejecución local
 
-Update the path variables at the top of the data-loading cells:
+Actualizar las variables de ruta al inicio de las celdas de carga de datos:
 
 ```python
-path_train  = "/path/to/distemist_subtrack2_training1_linking.tsv"
-path_snomed = "/path/to/sct2_Description_Snapshot-en_INT_20260101.txt"
+path_train  = "/ruta/a/distemist_subtrack2_training1_linking.tsv"
+path_snomed = "/ruta/a/sct2_Description_Snapshot-en_INT_20260101.txt"
 ```
 
-Then run the notebook cell by cell or via:
+Luego ejecutar el notebook celda por celda o mediante:
 
 ```bash
 jupyter nbconvert --to notebook --execute Clinical_coding.ipynb
@@ -176,67 +175,49 @@ jupyter nbconvert --to notebook --execute Clinical_coding.ipynb
 
 ---
 
-## Models
+## Modelos
 
-| Model | Role | Source |
+| Modelo | Función | Fuente |
 |---|---|---|
-| `Helsinki-NLP/opus-mt-es-en` | Spanish → English translation | [HuggingFace Hub](https://huggingface.co/Helsinki-NLP/opus-mt-es-en) |
-| `intfloat/multilingual-e5-large` | Sentence embeddings (query & passage) | [HuggingFace Hub](https://huggingface.co/intfloat/multilingual-e5-large) |
+| `Helsinki-NLP/opus-mt-es-en` | Traducción español → inglés | [HuggingFace Hub](https://huggingface.co/Helsinki-NLP/opus-mt-es-en) |
+| `intfloat/multilingual-e5-large` | Embeddings de oraciones (consulta y pasaje) | [HuggingFace Hub](https://huggingface.co/intfloat/multilingual-e5-large) |
 
-Both models are downloaded automatically on first run.
+Ambos modelos se descargan automáticamente en la primera ejecución.
 
 ---
 
-## Evaluation
+## Evaluación
 
-The pipeline is evaluated using standard **recall at K** metrics on the DisTEMIST linking subset:
+El pipeline se evalúa con métricas estándar de **recall@K** sobre el subconjunto de vinculación de DisTEMIST:
 
-| Metric | Description |
+| Métrica | Descripción |
 |---|---|
-| **Accuracy / Recall@1** | True SNOMED code is the top-ranked prediction |
-| **Recall@5** | True code appears within the top 5 candidates |
-| **Recall@10** | True code appears within the top 10 candidates |
+| **Exactitud / Recall@1** | El código SNOMED correcto es la predicción de mayor rango |
+| **Recall@5** | El código correcto aparece entre los 5 candidatos principales |
+| **Recall@10** | El código correcto aparece entre los 10 candidatos principales |
 
-Results are printed after the FAISS search step. A full prediction DataFrame (`df_preds`) is also produced with per-entity breakdown including `match`, `in_top5`, and `in_top10` flags for downstream error analysis.
+Los resultados se imprimen tras el paso de búsqueda FAISS. También se genera un DataFrame completo (`df_preds`) con el desglose por entidad, incluyendo las banderas `match`, `in_top5` e `in_top10` para análisis de errores.
 
 ---
 
-## Project Structure
+## Estructura del Proyecto
 
 ```
 .
-├── Clinical_coding.ipynb                              # Main pipeline notebook
-├── Presentation - Vinculacion de Entidades Medicas.pdf  # Project slide deck
-├── README.md                                          # This file
-├── .gitignore                                         # Excludes the SNOMED snapshot
+├── Clinical_coding.ipynb                                # Notebook principal del pipeline
+├── Presentation - Vinculacion de Entidades Medicas.pdf  # Presentación del proyecto
+├── README.md                                            # Este archivo
+├── .gitignore                                           # Excluye el snapshot de SNOMED CT
 └── data/
-    └── distemist_subtrack2_training1_linking.tsv      # DisTEMIST NER entities (included)
-    # sct2_Description_Snapshot-en_INT_*.txt           # ← NOT included (licence + size)
+    └── distemist_subtrack2_training1_linking.tsv        # Entidades NER de DisTEMIST (incluido)
+    # sct2_Description_Snapshot-en_INT_*.txt             # ← NO incluido (licencia + tamaño)
 ```
 
 ---
 
-## Known Limitations
+## Limitaciones Conocidas
 
-- **Dictionary coverage:** `MEDICAL_DICT` covers a curated set of common terms. Rare or domain-specific expressions fall back to neural MT, which may introduce translation noise.
-- **SNOMED subsetting:** To keep the FAISS index tractable, non-target concepts are stratified-sampled at 3,000 per semantic tag. This improves speed but may reduce recall for concepts in underrepresented tags.
-- **No fine-tuning:** The embedding model is used zero-shot. Task-specific fine-tuning on DisTEMIST data is expected to improve Recall@1 substantially.
-- **Colab paths:** Cell 16–17 contain Colab-specific code (`drive.mount`, `git clone`). These cells should be skipped or adapted for local execution.
-
----
-
-## Contributing
-
-Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change. When contributing, please:
-
-- Follow [PEP 8](https://pep8.org/) style guidelines.
-- Add or update docstrings for any new functions.
-- Ensure the notebook runs end-to-end before submitting.
-
----
-
-## License
-
-This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for details.
-
-> **Third-party licences:** SNOMED CT is licenced separately by [SNOMED International](https://www.snomed.org/get-snomed). Ensure compliance with your local affiliate's terms before using the snapshot file.
+- **Cobertura del diccionario:** `MEDICAL_DICT` cubre un conjunto de términos frecuentes. Las expresiones poco comunes o muy especializadas caen al modelo de traducción neuronal, que puede introducir ruido. Cabe señalar que las traducciones no fueron revisadas por ningún experto en el área.
+- **Submuestreo de SNOMED CT:** Para mantener el índice FAISS manejable, los conceptos que no son objetivo se muestrean de forma estratificada a 3,000 por etiqueta semántica. Esto mejora la velocidad pero puede reducir el recall para conceptos en etiquetas poco representadas.
+- **Sin ajuste fino:** El modelo de embeddings se usa de forma *zero-shot*. Se espera que el ajuste fino específico sobre datos de DisTEMIST mejore sustancialmente el Recall@1.
+- **Celdas específicas de Colab:** Las celdas 16 y 17 contienen código específico de Google Colab (`drive.mount`, `git clone`). Deben omitirse o adaptarse para ejecución local.
