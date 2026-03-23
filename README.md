@@ -140,7 +140,7 @@ Este archivo forma parte del corpus **DisTEMIST**. También puede descargarse de
 sct2_Description_Snapshot-en_INT_20260101.txt
 ```
 
-Snapshot oficial de la Edición Internacional de SNOMED CT (separado por tabulaciones, ~226 MB). Este archivo está **excluido del repositorio** por dos razones: supera el límite de 100 MB de GitHub y es propietario — su redistribución no está permitida bajo la licencia de SNOMED CT.
+Snapshot oficial de la Edición Internacional de SNOMED CT. Este archivo está **excluido del repositorio** por dos razones: supera el límite de 100 MB de GitHub y su redistribución no está permitida bajo la licencia de SNOMED CT.
 
 **Cómo obtenerlo:**
 1. Registrarse para obtener una licencia gratuita en [SNOMED International](https://www.snomed.org/get-snomed).
@@ -220,4 +220,4 @@ Los resultados se imprimen tras el paso de búsqueda FAISS. También se genera u
 - **Cobertura del diccionario:** `MEDICAL_DICT` cubre un conjunto de términos frecuentes. Las expresiones poco comunes o muy especializadas caen al modelo de traducción neuronal, que puede introducir ruido. Cabe señalar que las traducciones no fueron revisadas por ningún experto en el área.
 - **Submuestreo de SNOMED CT:** Para mantener el índice FAISS manejable, los conceptos que no son objetivo se muestrean de forma estratificada a 3,000 por etiqueta semántica. Esto mejora la velocidad pero puede reducir el recall para conceptos en etiquetas poco representadas.
 - **Sin ajuste fino:** El modelo de embeddings se usa de forma *zero-shot*. Se espera que el ajuste fino específico sobre datos de DisTEMIST mejore sustancialmente el Recall@1.
-- **Celdas específicas de Colab:** Las celdas 16 y 17 contienen código específico de Google Colab (`drive.mount`, `git clone`). Deben omitirse o adaptarse para ejecución local.
+- **Granularidad semántica en SNOMED CT:** Un mismo código de concepto puede tener múltiples descripciones clínicas distintas en la base de conocimiento (por ejemplo, el código ´160602000´ agrupa "Occasional smoker", "Trivial smoker - < 1 cig/day" y otras variantes). Dado que el pipeline aplica `drop_duplicates` por conceptId` al construir el índice FAISS, solo una de esas descripciones queda representada en el espacio vectorial. Si la descripción retenida no es la más cercana semánticamente a la mención en español del .tsv, el modelo no recuperará el código correcto aunque el concepto exista en la base, lo que penaliza artificialmente las métricas de evaluación.
